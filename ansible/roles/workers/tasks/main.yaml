@@ -1,0 +1,73 @@
+---
+- name: create installation directories
+  file:
+    state: directory
+    path: "{{ item }}"
+  with_items:
+    - /etc/containerd
+    - /opt/cni/bin
+
+- name: Remove swapfile from /etc/fstab
+  mount:
+    name: "{{ item }}"
+    fstype: swap
+    state: absent
+  with_items:
+    - swap
+    - none
+    
+- name: download runc binaries
+  get_url:
+    url: "{{ item.src }}"
+    dest: "/usr/local/sbin/{{ item.name }}"
+    mode: 0755
+  with_items:
+    - { src: 'https://github.com/opencontainers/runc/releases/download/v1.1.2/runc.amd64', name: runc}
+
+- name: Install containerd and crictl.
+  unarchive:
+    src: '{{ item.src }}'
+    dest: "{{ item.dest }}" 
+    remote_src: yes
+    creates: "{{ item.dest }}/{{ item.creates }}"
+    mode: 0755
+  with_items:
+    - {src: 'https://github.com/kubernetes-sigs/cri-tools/releases/download/v1.22.1/crictl-v1.22.1-linux-amd64.tar.gz', dest: /usr/local/, creates: crictl }
+    - {src: 'https://github.com/containerd/containerd/releases/download/v1.6.4/containerd-1.6.4-linux-amd64.tar.gz', dest: /usr/local/, creates: containerd }
+    
+- name: Install cni.
+  unarchive:
+    src: '{{ item.src }}'
+    dest: "{{ item.dest }}" 
+    remote_src: yes
+    mode: 0755
+  with_items:
+    - {src: 'https://github.com/containernetworking/plugins/releases/download/v1.1.1/cni-plugins-linux-amd64-v1.1.1.tgz', dest: /opt/cni/bin }
+
+- name: template kubelet-config.yaml, kube-proxy-config.yaml, kubelet.service, kube-proxy.service
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+  with_items:
+    - { src: containerd.service.j2, dest: /etc/systemd/system/containerd.service }
+
+- name: start worker services
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
+  with_items:
+    - containerd
+
+- name: download kube-proxy, kubelet and kubectl binaries, 
+  get_url:
+    url: "{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.name }}"
+    mode: 0755
+  with_items:
+    - { src: 'https://storage.googleapis.com/kubernetes-release/release/{{ kubernetes_version }}/bin/linux/amd64/kube-proxy', name: kube-proxy }
+    - { src: 'https://storage.googleapis.com/kubernetes-release/release/{{ kubernetes_version }}/bin/linux/amd64/kubectl', name: kubectl }
+    - { src: 'https://storage.googleapis.com/kubernetes-release/release/{{ kubernetes_version }}/bin/linux/amd64/kubelet', name: kubelet }
+
+
